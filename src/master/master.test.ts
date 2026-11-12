@@ -182,7 +182,7 @@ describe('sync', () => {
       expect(db.fetch('matchID', { state: true })).toEqual({
         state: undefined,
       });
-    },
+    }
   );
 });
 

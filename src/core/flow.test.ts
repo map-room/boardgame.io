@@ -1689,10 +1689,10 @@ describe('events in hooks', () => {
       const errorMessage = (error as jest.Mock).mock.calls[0][0];
       expect(errorMessage).toMatch(/events plugin declared action invalid/);
       expect(errorMessage).toMatch(
-        /`endTurn` & `pass` are disallowed in a phase’s `onBegin` hook/,
+        /`endTurn` & `pass` are disallowed in a phase’s `onBegin` hook/
       );
       expect(errorMessage).toMatch(
-        /Use `turn.order.first` to choose the starting player/,
+        /Use `turn.order.first` to choose the starting player/
       );
     });
 
@@ -1716,10 +1716,10 @@ describe('events in hooks', () => {
       const errorMessage = (error as jest.Mock).mock.calls[0][0];
       expect(errorMessage).toMatch(/events plugin declared action invalid/);
       expect(errorMessage).toMatch(
-        /`endTurn` & `pass` are disallowed in a phase’s `onBegin` hook/,
+        /`endTurn` & `pass` are disallowed in a phase’s `onBegin` hook/
       );
       expect(errorMessage).toMatch(
-        /Use `turn.order.first` to choose the starting player/,
+        /Use `turn.order.first` to choose the starting player/
       );
     });
 
@@ -1770,7 +1770,7 @@ describe('events in hooks', () => {
       const errorMessage = (error as jest.Mock).mock.calls[0][0];
       expect(errorMessage).toMatch(/events plugin declared action invalid/);
       expect(errorMessage).toMatch(
-        /`endTurn` & `pass` are disallowed in `onEnd` hooks/,
+        /`endTurn` & `pass` are disallowed in `onEnd` hooks/
       );
     });
 
@@ -1795,7 +1795,7 @@ describe('events in hooks', () => {
       const errorMessage = (error as jest.Mock).mock.calls[0][0];
       expect(errorMessage).toMatch(/events plugin declared action invalid/);
       expect(errorMessage).toMatch(
-        /`endTurn` & `pass` are disallowed in `onEnd` hooks/,
+        /`endTurn` & `pass` are disallowed in `onEnd` hooks/
       );
     });
 
@@ -1827,7 +1827,7 @@ describe('events in hooks', () => {
       const errorMessage = (error as jest.Mock).mock.calls[0][0];
       expect(errorMessage).toMatch(/events plugin declared action invalid/);
       expect(errorMessage).toMatch(
-        /`endTurn` & `pass` are disallowed in `onEnd` hooks/,
+        /`endTurn` & `pass` are disallowed in `onEnd` hooks/
       );
     });
 
@@ -1859,7 +1859,7 @@ describe('events in hooks', () => {
       const errorMessage = (error as jest.Mock).mock.calls[0][0];
       expect(errorMessage).toMatch(/events plugin declared action invalid/);
       expect(errorMessage).toMatch(
-        /`endTurn` & `pass` are disallowed in `onEnd` hooks/,
+        /`endTurn` & `pass` are disallowed in `onEnd` hooks/
       );
     });
   });

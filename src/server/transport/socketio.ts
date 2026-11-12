@@ -123,7 +123,7 @@ export class SocketIO {
    * Register client data for a socket.
    */
   private addClient(client: Client, game: Game): void {
-    const { matchID, socket } = client;
+    const { matchID, playerID, socket } = client;
     // Add client to list of connected sockets for this match.
     let matchClients = this.roomInfo.get(matchID);
     if (matchClients === undefined) {
@@ -139,7 +139,7 @@ export class SocketIO {
       seats = new Map();
       this.heldSeats.set(socket.id, seats);
     }
-    seats.set(`${matchID}:${client.playerID}`, client);
+    seats.set(`${matchID}:${playerID}`, client);
   }
 
   /**
