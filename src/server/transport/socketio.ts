@@ -230,12 +230,28 @@ export class SocketIO {
             app.context.auth
           );
 
-          const syncResponse = await master.onSync(...args);
-          if (syncResponse && syncResponse.error === 'unauthorized') {
-            return;
-          }
-          this.addClient(requestingClient, game);
-          await master.onConnectionChange(matchID, playerID, credentials, true);
+          // Serialize with every other connection change on this match
+          // (map-room/boardgame.io#1257).
+          const matchQueue = this.getMatchQueue(matchID);
+          await matchQueue.add(async () => {
+            const syncResponse = await master.onSync(...args);
+            if (syncResponse && syncResponse.error === 'unauthorized') {
+              return;
+            }
+            // The socket may have dropped while the sync was queued or in
+            // flight. Its disconnect handler has already run, so registering
+            // now would leave a heldSeats entry nothing ever clears, and
+            // isSeatHeld would block other sockets' disconnects for the seat
+            // (map-room/map-room#4865).
+            if (!socket.connected) return;
+            this.addClient(requestingClient, game);
+            await master.onConnectionChange(
+              matchID,
+              playerID,
+              credentials,
+              true
+            );
+          });
         });
 
         socket.on('disconnect', async () => {
@@ -254,12 +270,18 @@ export class SocketIO {
               TransportAPI(matchID, socket, filterPlayerView, this.pubSub),
               app.context.auth
             );
-            await master.onConnectionChange(
-              matchID,
-              playerID,
-              credentials,
-              false
-            );
+            const matchQueue = this.getMatchQueue(matchID);
+            await matchQueue.add(async () => {
+              // Re-check inside the queue: a sync queued ahead of this
+              // disconnect may have registered another socket on the seat.
+              if (this.isSeatHeld(matchID, playerID)) return;
+              await master.onConnectionChange(
+                matchID,
+                playerID,
+                credentials,
+                false
+              );
+            });
           }
         });
 

@@ -63,18 +63,21 @@ jest.mock('../../master/master', () => {
 jest.mock('koa-socket-2', () => {
   class MockSocket {
     id: string;
+    connected: boolean;
     callbacks: Record<string, (...args: any[]) => any>;
     emit: jest.Mock<any, any>;
     broadcast: { emit: jest.Mock<any, any> };
 
     constructor() {
       this.id = 'id';
+      this.connected = true;
       this.callbacks = {};
       this.emit = jest.fn();
       this.broadcast = { emit: jest.fn() };
     }
 
     async receive(type, ...args) {
+      if (type === 'disconnect') this.connected = false;
       await this.callbacks[type](args[0], args[1], args[2], args[3], args[4]);
       return;
     }

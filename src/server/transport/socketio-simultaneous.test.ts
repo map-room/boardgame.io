@@ -102,18 +102,21 @@ class SocketIOTestAdapter extends SocketIO {
 jest.mock('koa-socket-2', () => {
   class MockSocket {
     id: string;
+    connected: boolean;
     callbacks: Record<string, (...args: any[]) => Promise<void>>;
     emit: jest.Mock<any, any>;
     broadcast: { emit: jest.Mock<any, any> };
 
     constructor({ id }: { id: string }) {
       this.id = id;
+      this.connected = true;
       this.callbacks = {};
       this.emit = jest.fn();
       this.broadcast = { emit: jest.fn() };
     }
 
     async receive(type, ...args) {
+      if (type === 'disconnect') this.connected = false;
       await this.callbacks[type](...args);
     }
 
