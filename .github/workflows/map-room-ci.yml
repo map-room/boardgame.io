@@ -1,0 +1,26 @@
+name: Map Room CI
+on:
+  push:
+    branches: [map-room/0.50.2]
+  pull_request:
+    branches: [map-room/0.50.2]
+jobs:
+  jest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npm run ts
+      - run: npx cross-env NODE_ENV=test jest
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npm run build && npm run proxydirs
+      - name: Confirm the #4217 patch is in the built server
+        run: grep -q heldSeats dist/cjs/server.js
