@@ -77,6 +77,10 @@ interface Client {
 export class SocketIO {
   protected clientInfo: Map<string, Client>;
   protected roomInfo: Map<string, Set<string>>;
+  // Map Room #4217: every seat each socket has authenticated, by socket ID.
+  // A client switching seats re-syncs on the same socket, and clientInfo only
+  // keeps the latest, so disconnect must clear them all.
+  private heldSeats: Map<string, Map<string, Client>>;
   protected perMatchQueue: Map<string, PQueue>;
   private readonly https: HttpsOptions;
   private readonly socketAdapter: any;
@@ -86,6 +90,7 @@ export class SocketIO {
   constructor({ https, socketAdapter, socketOpts, pubSub }: SocketOpts = {}) {
     this.clientInfo = new Map();
     this.roomInfo = new Map();
+    this.heldSeats = new Map();
     this.perMatchQueue = new Map();
     this.https = https;
     this.socketAdapter = socketAdapter;
@@ -129,6 +134,22 @@ export class SocketIO {
     matchClients.add(socket.id);
     // Register data for this socket in the client map.
     this.clientInfo.set(socket.id, client);
+    let seats = this.heldSeats.get(socket.id);
+    if (seats === undefined) {
+      seats = new Map();
+      this.heldSeats.set(socket.id, seats);
+    }
+    seats.set(`${matchID}:${client.playerID}`, client);
+  }
+
+  /**
+   * Map Room #4217: true when a live socket still holds this seat.
+   */
+  private isSeatHeld(matchID: string, playerID: string): boolean {
+    for (const seats of this.heldSeats.values()) {
+      if (seats.has(`${matchID}:${playerID}`)) return true;
+    }
+    return false;
   }
 
   private subscribePubSubChannel(matchID: string, game: Game) {
@@ -218,10 +239,15 @@ export class SocketIO {
         });
 
         socket.on('disconnect', async () => {
-          const client = this.clientInfo.get(socket.id);
+          const seats = this.heldSeats.get(socket.id);
+          this.heldSeats.delete(socket.id);
           this.removeClient(socket.id);
-          if (client) {
-            const { matchID, playerID, credentials } = client;
+          // Sequential: each onConnectionChange rewrites the whole metadata
+          // record, so concurrent calls would lose updates.
+          for (const { matchID, playerID, credentials } of seats
+            ? seats.values()
+            : []) {
+            if (this.isSeatHeld(matchID, playerID)) continue;
             const master = new Master(
               game,
               app.context.db,
