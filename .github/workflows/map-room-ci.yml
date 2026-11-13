@@ -24,3 +24,83 @@ jobs:
       - run: npm run build && npm run proxydirs
       - name: Confirm the #4217 patch is in the built server
         run: grep -q heldSeats dist/cjs/server.js
+  # Runs only after jest (that job also runs `npm run ts`) and build.
+  # Packs this commit, installs the tarball into map-room packages/server,
+  # and runs the two specs that lock the fork's server contract. A fork
+  # change that breaks those specs fails this job.
+  #
+  # Pin: map-room ref `main`. Those specs live on that branch; the checkout
+  # step logs the resolved SHA. This is a branch pin, not a frozen SHA, so
+  # the contract tracks map-room main.
+  #
+  # map-room/map-room is private. This repo's GITHUB_TOKEN cannot read it.
+  # MAP_ROOM_CHECKOUT_KEY is a read-only deploy key for map-room/map-room,
+  # stored as a secret on map-room/boardgame.io.
+  map-room-server:
+    needs: [jest, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - name: Build and pack
+        id: pack
+        run: |
+          tarball=$(npm pack | tail -n 1)
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          test -f "$tarball"
+          tar -xOf "$tarball" package/dist/cjs/server.js | grep -q heldSeats
+          tar -tzf "$tarball" | grep -qx 'package/server/package.json'
+      - name: Require the map-room deploy key
+        env:
+          MAP_ROOM_CHECKOUT_KEY: ${{ secrets.MAP_ROOM_CHECKOUT_KEY }}
+        run: |
+          if [ -z "$MAP_ROOM_CHECKOUT_KEY" ]; then
+            echo "MAP_ROOM_CHECKOUT_KEY is unset. It must be a read-only deploy key for map-room/map-room."
+            exit 1
+          fi
+      - name: Checkout map-room main
+        uses: actions/checkout@v4
+        with:
+          repository: map-room/map-room
+          ref: main
+          path: map-room
+          fetch-depth: 1
+          ssh-key: ${{ secrets.MAP_ROOM_CHECKOUT_KEY }}
+      - name: Record the pinned map-room revision
+        working-directory: map-room
+        run: git rev-parse HEAD && git log -1 --oneline
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: map-room/package.json
+      - name: Install the packed fork into packages/server
+        working-directory: map-room
+        run: |
+          # `pnpm --filter add` resolves a relative tarball from packages/server,
+          # not from the workspace root, so pass an absolute path.
+          tarball="$PWD/boardgame.io.tgz"
+          cp "../${{ steps.pack.outputs.tarball }}" "$tarball"
+          pnpm install --filter '@map-room/server...' --frozen-lockfile
+          pnpm --filter @map-room/server add "$tarball"
+          spec=$(node -p "require('./packages/server/package.json').dependencies['boardgame.io']")
+          echo "packages/server boardgame.io -> $spec"
+          case "$spec" in
+            *boardgame.io.tgz*) ;;
+            *) echo "expected the packed tarball, got: $spec"; exit 1 ;;
+          esac
+          resolved=$(cd packages/server && node -e "process.stdout.write(require('fs').realpathSync(require.resolve('boardgame.io/server')))")
+          echo "resolved boardgame.io/server -> $resolved"
+          case "$resolved" in
+            *file+*|*boardgame.io.tgz*) ;;
+            *) echo "server import did not resolve to the packed tarball"; exit 1 ;;
+          esac
+      - name: Run defender-disconnect-watchdog and seat-switch-presence-4217
+        working-directory: map-room
+        run: |
+          pnpm --filter @map-room/server exec vitest run \
+            src/__tests__/defender-disconnect-watchdog.test.ts \
+            src/__tests__/seat-switch-presence-4217.test.ts
