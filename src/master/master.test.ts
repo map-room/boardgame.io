@@ -701,8 +701,14 @@ describe('patch', () => {
       const endStage = ActionCreators.gameEvent('endStage', undefined, '1');
       await master.onUpdate(endStage, 2, 'matchID', '1');
       await master.onUpdate(ActionCreators.undo('0'), 3, 'matchID', '1');
-      // The master allows this, but the reducer does not.
-      expect(error).toHaveBeenCalledWith(`Cannot undo other players' moves`);
+      // Seat '1' claimed to undo as '0'. The action is bound to seat '1', so
+      // the reducer never sees a cross-seat undo (map-room#5005).
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('overwritten with authenticated playerID=[1]')
+      );
+      expect(error).not.toHaveBeenCalledWith(
+        `Cannot undo other players' moves`
+      );
 
       // Clean-up active players.
       const endStage2 = ActionCreators.gameEvent('endStage', undefined, '1');
@@ -712,9 +718,9 @@ describe('patch', () => {
 
   test('game over', async () => {
     let event = ActionCreators.gameEvent('endGame');
-    await master.onUpdate(event, 3, 'matchID', '1');
+    await master.onUpdate(event, 5, 'matchID', '1');
     event = ActionCreators.gameEvent('endTurn');
-    await master.onUpdate(event, 3, 'matchID', '1');
+    await master.onUpdate(event, 5, 'matchID', '1');
     expect(error).toHaveBeenCalledWith(
       `game over - matchID=[matchID] - playerID=[1] - action[endTurn]`
     );
@@ -843,7 +849,8 @@ describe('subscribe', () => {
     master.onUpdate(action, 0, 'matchID', '0');
     expect(callback).toBeCalledWith({
       matchID: 'matchID',
-      action,
+      // The action carries the authenticated seat it was bound to.
+      action: { ...action, payload: { ...action.payload, playerID: '0' } },
       state: expect.objectContaining({ _stateID: 1 }),
     });
   });
@@ -1080,5 +1087,132 @@ describe('chat', () => {
         { id: 'uuid', sender: '0', payload: { message: 'foo' } },
       ],
     });
+  });
+});
+
+describe('onUpdate binds actions to the authenticated seat (map-room#5005)', () => {
+  const send = jest.fn();
+  const sendAll = jest.fn();
+
+  type G = { lastMover?: string | null };
+
+  const makeGame = (events?: Game['events']): Game<G> => ({
+    seed: 0,
+    setup: () => ({}),
+    events,
+    // Both seats may move at once, so the only thing separating them is identity.
+    turn: { activePlayers: { all: 'play' } },
+    moves: {
+      whoAmI: ({ G, playerID }) => {
+        G.lastMover = playerID;
+      },
+      // A move that raises an event itself, the way map-room's moves call events.setPhase.
+      goToB: ({ events }) => {
+        events.setPhase('B');
+      },
+      finish: ({ events }) => {
+        events.endGame({ winner: '0' });
+      },
+    },
+    phases: { A: { start: true, next: 'B' }, B: {} },
+  });
+
+  const boot = async (game: Game<G>) => {
+    const db = new InMemory();
+    const master = new Master(game, db, TransportAPI(send, sendAll));
+    await master.onSync('matchID', '0', undefined, 2);
+    jest.clearAllMocks();
+    return { master, db };
+  };
+
+  const stateOf = (db: InMemory) => db.fetch('matchID', { state: true }).state;
+
+  test('a seat cannot move as another seat', async () => {
+    const { master, db } = await boot(makeGame());
+    // Seat '0' is authenticated; the payload claims to be seat '1'.
+    await master.onUpdate(
+      ActionCreators.makeMove('whoAmI', [], '1'),
+      0,
+      'matchID',
+      '0'
+    );
+    expect(stateOf(db).G.lastMover).toBe('0');
+  });
+
+  test('an action with no playerID is bound to the authenticated seat', async () => {
+    const { master, db } = await boot(makeGame());
+    await master.onUpdate(ActionCreators.makeMove('whoAmI'), 0, 'matchID', '1');
+    expect(stateOf(db).G.lastMover).toBe('1');
+  });
+
+  test('a client cannot fire an event the game disabled', async () => {
+    const { master, db } = await boot(
+      makeGame({ endGame: false, setPhase: false })
+    );
+    for (const name of ['endGame', 'setPhase']) {
+      const ret = await master.onUpdate(
+        ActionCreators.gameEvent(
+          name,
+          name === 'setPhase' ? ['B'] : [{ winner: '0' }],
+          '0'
+        ),
+        0,
+        'matchID',
+        '0'
+      );
+      expect(ret).toEqual({ error: 'unauthorized action' });
+    }
+    expect(sendAll).not.toHaveBeenCalled();
+    expect(stateOf(db).ctx.gameover).toBeUndefined();
+    expect(stateOf(db).ctx.phase).toBe('A');
+  });
+
+  test('a client cannot send an internal action type', async () => {
+    const { master, db } = await boot(makeGame());
+    const before = stateOf(db)._stateID;
+    for (const type of ['PLUGIN', 'STRIP_TRANSIENTS', 'UPDATE']) {
+      const ret = await master.onUpdate(
+        { type, payload: { type: 'x', args: [], playerID: '0' } } as any,
+        0,
+        'matchID',
+        '0'
+      );
+      expect(ret).toEqual({ error: 'unauthorized action' });
+    }
+    expect(stateOf(db)._stateID).toBe(before);
+  });
+
+  test('a client can still fire an event the game left enabled', async () => {
+    const { master, db } = await boot(
+      makeGame({ endGame: false, setPhase: false })
+    );
+    const ret = await master.onUpdate(
+      ActionCreators.gameEvent('endTurn', [], '0'),
+      0,
+      'matchID',
+      '0'
+    );
+    expect(ret).toBeUndefined();
+    expect(stateOf(db).ctx.turn).toBe(2);
+  });
+
+  test('a move can still raise an event the game disabled for clients', async () => {
+    const { master, db } = await boot(
+      makeGame({ endGame: false, setPhase: false })
+    );
+    await master.onUpdate(
+      ActionCreators.makeMove('goToB', [], '0'),
+      0,
+      'matchID',
+      '0'
+    );
+    expect(stateOf(db).ctx.phase).toBe('B');
+    await master.onUpdate(
+      ActionCreators.makeMove('finish', [], '0'),
+      1,
+      'matchID',
+      '0'
+    );
+    expect(stateOf(db).ctx.gameover).toEqual({ winner: '0' });
   });
 });
