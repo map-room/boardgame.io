@@ -1167,6 +1167,21 @@ describe('onUpdate binds actions to the authenticated seat (map-room#5005)', () 
     expect(stateOf(db).ctx.phase).toBe('A');
   });
 
+  test('a client cannot send an internal action type', async () => {
+    const { master, db } = await boot(makeGame());
+    const before = stateOf(db)._stateID;
+    for (const type of ['PLUGIN', 'STRIP_TRANSIENTS', 'UPDATE']) {
+      const ret = await master.onUpdate(
+        { type, payload: { type: 'x', args: [], playerID: '0' } } as any,
+        0,
+        'matchID',
+        '0'
+      );
+      expect(ret).toEqual({ error: 'unauthorized action' });
+    }
+    expect(stateOf(db)._stateID).toBe(before);
+  });
+
   test('a client can still fire an event the game left enabled', async () => {
     const { master, db } = await boot(
       makeGame({ endGame: false, setPhase: false })

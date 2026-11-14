@@ -155,6 +155,14 @@ export class Master {
       return { error: 'missing action or action payload' };
     }
 
+    // Only these four are things a client sends. Anything else (PLUGIN,
+    // STRIP_TRANSIENTS, ...) is internal and must not reach the reducer from
+    // the wire (map-room#5005).
+    if (![MAKE_MOVE, GAME_EVENT, UNDO, REDO].includes(credAction.type)) {
+      logging.error(`unauthorized action type: ${credAction.type}`);
+      return { error: 'unauthorized action' };
+    }
+
     let metadata: Server.MatchData | undefined;
     if (StorageAPI.isSynchronous(this.storageAPI)) {
       ({ metadata } = this.storageAPI.fetch(matchID, { metadata: true }));
