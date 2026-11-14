@@ -11,7 +11,7 @@ import {
   TransientHandlingMiddleware,
 } from '../core/reducer';
 import { ProcessGameConfig, IsLongFormMove } from '../core/game';
-import { UNDO, REDO, MAKE_MOVE } from '../core/action-types';
+import { UNDO, REDO, MAKE_MOVE, GAME_EVENT } from '../core/action-types';
 import { createStore, applyMiddleware } from 'redux';
 import * as logging from '../core/logger';
 import type {
@@ -175,6 +175,29 @@ export class Master {
 
     const action = stripCredentialsFromAction(credAction);
     const key = matchID;
+
+    // The credentials above vouch for `playerID`, but the reducer acts as
+    // `action.payload.playerID`. Bind the action to the authenticated seat so
+    // one seat cannot move or fire events as another (map-room#5005).
+    const claimedPlayerID = action.payload.playerID;
+    if (claimedPlayerID !== undefined && claimedPlayerID !== playerID) {
+      logging.error(
+        `payload playerID=[${claimedPlayerID}] overwritten with authenticated` +
+          ` playerID=[${playerID}] - action[${action.payload.type}]`
+      );
+    }
+    action.payload = { ...action.payload, playerID };
+
+    // Honour the game's `events` config on the server: a client cannot fire an
+    // event the game disabled (e.g. `endGame: false`). Events a move raises
+    // itself (`events.setPhase(...)` inside a move) never pass through here.
+    if (
+      action.type === GAME_EVENT &&
+      !this.game.flow.enabledEventNames.includes(action.payload.type)
+    ) {
+      logging.error(`unauthorized game event: ${action.payload.type}`);
+      return { error: 'unauthorized action' };
+    }
 
     let state: State;
     if (StorageAPI.isSynchronous(this.storageAPI)) {
